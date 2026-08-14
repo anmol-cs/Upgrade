@@ -1,16 +1,14 @@
 import { skillsRepository } from '@/database/repositories/skillsRepository';
 import { generateId } from '@/utils/id';
-import { now, todayKey } from '@/utils/date';
+import { now } from '@/utils/date';
 import { assignIcon } from '@/utils/icon';
 import { ValidationError, ConflictError } from '@/utils/errors';
+import { startOfDay, addDays } from 'date-fns';
 import type { Skill } from '@/database/schema';
 
-function dayStartMs(dateKey: string): number {
-  return new Date(`${dateKey}T00:00:00`).getTime();
-}
-
-function nextDayStartMs(dateKey: string): number {
-  return dayStartMs(todayKey(new Date(`${dateKey}T00:00:00`)).replace(/.$/, '1'));
+function todayWindow(): { start: number; end: number } {
+  const start = startOfDay(new Date());
+  return { start: start.getTime(), end: addDays(start, 1).getTime() };
 }
 
 export const skillsService = {
@@ -50,10 +48,7 @@ export const skillsService = {
     await skillsRepository.update(id, { state: 'inactive', updatedAt: now() });
   },
 
-  /**
-   * Marks the skill complete for today by recording a daily practice session.
-   * The skill remains active so it returns to Routine on the next day.
-   */
+  /** Marks the skill complete for today by recording a daily practice session. */
   async completeSkill(id: string, durationMinutes: number): Promise<void> {
     const skill = await skillsRepository.getById(id);
     if (skill.archived) throw new ConflictError('Cannot complete an archived skill.');
@@ -62,9 +57,7 @@ export const skillsService = {
       throw new ValidationError('Practice time must be greater than zero.');
     }
 
-    const dateKey = todayKey();
-    const start = dayStartMs(dateKey);
-    const end = start + 24 * 60 * 60 * 1000;
+    const { start, end } = todayWindow();
     const existing = await skillsRepository.getSessionForDate(id, start, end);
     if (existing) throw new ConflictError('This skill is already completed for today.');
 
@@ -106,8 +99,6 @@ export const skillsService = {
   },
 
   async getCompletedSkills(): Promise<Skill[]> {
-    // "Completed" now means practiced at least once. Keep the legacy state
-    // compatible with older data while daily practice controls Routine visibility.
     const all = await skillsRepository.list(true);
     return all.filter((s) => s.state === 'completed' && !s.archived);
   },
@@ -122,8 +113,7 @@ export const skillsService = {
   },
 
   async isCompletedToday(skillId: string): Promise<boolean> {
-    const start = dayStartMs(todayKey());
-    const end = start + 24 * 60 * 60 * 1000;
+    const { start, end } = todayWindow();
     return Boolean(await skillsRepository.getSessionForDate(skillId, start, end));
   },
 };
