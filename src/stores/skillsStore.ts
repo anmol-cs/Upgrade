@@ -16,7 +16,7 @@ interface SkillsState {
   create: (title: string, targetMinutes?: number) => Promise<void>;
   activate: (id: string) => Promise<void>;
   deactivate: (id: string) => Promise<void>;
-  complete: (id: string) => Promise<void>;
+  complete: (id: string, minutes: number) => Promise<void>;
   archive: (id: string) => Promise<void>;
   restore: (id: string) => Promise<void>;
   reorder: (orderedIds: string[]) => Promise<void>;
@@ -51,10 +51,6 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       await skillsService.createSkill(title, targetMinutes);
       await get().load();
     } catch (e) {
-      // Set error state for anything reading it passively, but also rethrow —
-      // a screen awaiting this call needs to know it failed, not just that
-      // some store field changed. Swallowing it here previously meant the
-      // creation sheet would close as if it had succeeded even on failure.
       set({ error: toUserMessage(e) });
       throw e;
     }
@@ -72,24 +68,26 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     refreshRoutineWidget();
   },
 
-  complete: async (id) => {
-    await skillsService.completeSkill(id);
+  complete: async (id, minutes) => {
+    await skillsService.completeSkill(id, minutes);
     await get().load();
+    refreshRoutineWidget();
   },
 
   archive: async (id) => {
     await skillsService.archiveSkill(id);
     await get().load();
+    refreshRoutineWidget();
   },
 
   restore: async (id) => {
     await skillsService.restoreSkill(id);
     await get().load();
+    refreshRoutineWidget();
   },
 
   reorder: async (orderedIds) => {
     const previous = get().active;
-    // Optimistic reorder for a snappier drag response.
     const reordered = orderedIds
       .map((id) => previous.find((s) => s.id === id))
       .filter((s): s is (typeof previous)[number] => Boolean(s));
