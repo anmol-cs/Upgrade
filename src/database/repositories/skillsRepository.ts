@@ -1,4 +1,4 @@
-import { eq, asc } from 'drizzle-orm';
+import { eq, asc, and, gte, lt } from 'drizzle-orm';
 import { db } from '../client';
 import { skills, skillSessions, type Skill, type NewSkill, type NewSkillSession } from '../schema';
 import { NotFoundError, PersistenceError } from '@/utils/errors';
@@ -20,7 +20,7 @@ export const skillsRepository = {
   },
 
   async list(includeArchived = false): Promise<Skill[]> {
-    const rows = await db.select().from(skills).orderBy(asc(skills.position));
+    const rows = await db.select().from(skills).orderBy(asc(skills.position), asc(skills.createdAt));
     return includeArchived ? rows : rows.filter((s) => !s.archived);
   },
 
@@ -50,5 +50,13 @@ export const skillsRepository = {
 
   async getSessions(skillId: string) {
     return db.select().from(skillSessions).where(eq(skillSessions.skillId, skillId));
+  },
+
+  async getSessionForDate(skillId: string, startMs: number, endMs: number) {
+    const [row] = await db
+      .select()
+      .from(skillSessions)
+      .where(and(eq(skillSessions.skillId, skillId), gte(skillSessions.completedAt, startMs), lt(skillSessions.completedAt, endMs)));
+    return row ?? null;
   },
 };
