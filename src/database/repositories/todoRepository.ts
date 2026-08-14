@@ -28,12 +28,14 @@ export const todoRepository = {
     await db.update(todos).set(patch).where(eq(todos.id, id));
   },
 
-  /**
-   * Single atomic write for completed+archived+completedAt together.
-   * Two sequential UPDATEs here would risk an inconsistent row (e.g. completed=true,
-   * archived=false) if the app were killed between them — that row would then be
-   * invisible to both getActiveTodos() and getArchivedTodos().
-   */
+  async archive(id: string): Promise<void> {
+    await db.update(todos).set({ archived: true, updatedAt: Date.now() }).where(eq(todos.id, id));
+  },
+
+  async delete(id: string): Promise<void> {
+    await db.delete(todos).where(eq(todos.id, id));
+  },
+
   async setCompletionState(id: string, completed: boolean): Promise<void> {
     await db
       .update(todos)
@@ -46,7 +48,6 @@ export const todoRepository = {
       .where(eq(todos.id, id));
   },
 
-  /** No dedicated position column — priority doubles as the display/drag order key. */
   async reorder(orderedIds: string[]): Promise<void> {
     const highest = orderedIds.length;
     await Promise.all(
