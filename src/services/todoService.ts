@@ -4,10 +4,6 @@ import { now } from '@/utils/date';
 import { ValidationError } from '@/utils/errors';
 import type { Todo } from '@/database/schema';
 
-/**
- * docs/07-Modules/03-ToDo-Module.md
- * To-dos persist until completed; completion archives the item automatically.
- */
 export const todoService = {
   async createTodo(title: string, opts?: { priority?: number; dueDate?: number }): Promise<Todo> {
     const trimmed = title.trim();
@@ -25,18 +21,22 @@ export const todoService = {
     });
   },
 
-  /** Completing a task marks it completed AND archived in a single write — see
-   * todoRepository.setCompletionState for why this must not be two separate calls. */
   async complete(id: string): Promise<void> {
     await todoRepository.setCompletionState(id, true);
   },
 
-  /** Undo immediately after accidental completion — restores to active. */
   async uncomplete(id: string): Promise<void> {
     await todoRepository.setCompletionState(id, false);
   },
 
-  /** Restoring an archived (completed) task returns it to the active list. */
+  async archiveTodo(id: string): Promise<void> {
+    await todoRepository.archive(id);
+  },
+
+  async deleteTodo(id: string): Promise<void> {
+    await todoRepository.delete(id);
+  },
+
   async restoreFromArchive(id: string): Promise<void> {
     await todoRepository.setCompletionState(id, false);
   },
@@ -47,7 +47,7 @@ export const todoService = {
 
   async getActiveTodos(): Promise<Todo[]> {
     const all = await todoRepository.list(false);
-    return all.filter((t) => !t.completed);
+    return all.filter((t) => !t.completed && !t.archived);
   },
 
   async getArchivedTodos(): Promise<Todo[]> {
