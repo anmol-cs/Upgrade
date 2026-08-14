@@ -1,21 +1,24 @@
 import { skillsRepository } from '@/database/repositories/skillsRepository';
 import { generateId } from '@/utils/id';
-import { now } from '@/utils/date';
+import { now, todayKey } from '@/utils/date';
 import { assignIcon } from '@/utils/icon';
 import { ValidationError, ConflictError } from '@/utils/errors';
 import type { Skill } from '@/database/schema';
 
-/**
- * docs/07-Modules/02-Skills-Module.md
- * States: inactive -> active -> completed; any -> archived.
- * Archived skills cannot accept new sessions. Practice history is immutable.
- */
+function dayStartMs(dateKey: string): number {
+  return new Date(`${dateKey}T00:00:00`).getTime();
+}
+
+function nextDayStartMs(dateKey: string): number {
+  return dayStartMs(todayKey(new Date(`${dateKey}T00:00:00`)).replace(/.$/, '1'));
+}
+
 export const skillsService = {
   async createSkill(title: string, targetMinutes?: number): Promise<Skill> {
     const trimmed = title.trim();
     if (!trimmed) throw new ValidationError('Skill title is required.');
 
-    const existing = await skillsRepository.list();
+    const existing = await skillsRepository.list(true);
     return skillsRepository.create({
       id: generateId(),
       title: trimmed,
@@ -33,7 +36,6 @@ export const skillsService = {
     await skillsRepository.reorder(orderedIds);
   },
 
-  /** Restored skills return in their prior state (Inactive/Completed) unless explicitly reactivated. */
   async restoreSkill(id: string): Promise<void> {
     await skillsRepository.restore(id);
   },
@@ -41,20 +43,38 @@ export const skillsService = {
   async activate(id: string): Promise<void> {
     const skill = await skillsRepository.getById(id);
     if (skill.archived) throw new ConflictError('Cannot activate an archived skill.');
-    await skillsRepository.update(id, { state: 'active', startedAt: now(), updatedAt: now() });
+    await skillsRepository.update(id, { state: 'active', startedAt: skill.startedAt ?? now(), updatedAt: now() });
   },
 
   async deactivate(id: string): Promise<void> {
     await skillsRepository.update(id, { state: 'inactive', updatedAt: now() });
   },
 
-  /** Records completion date and duration; moves to Completed state, visible in Insights. */
-  async completeSkill(id: string): Promise<void> {
+  /**
+   * Marks the skill complete for today by recording a daily practice session.
+   * The skill remains active so it returns to Routine on the next day.
+   */
+  async completeSkill(id: string, durationMinutes: number): Promise<void> {
     const skill = await skillsRepository.getById(id);
-    if (skill.state !== 'active') {
-      throw new ConflictError('Only active skills can be completed.');
+    if (skill.archived) throw new ConflictError('Cannot complete an archived skill.');
+    if (skill.state !== 'active') throw new ConflictError('Only active skills can be completed.');
+    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+      throw new ValidationError('Practice time must be greater than zero.');
     }
-    await skillsRepository.update(id, { state: 'completed', completedAt: now(), updatedAt: now() });
+
+    const dateKey = todayKey();
+    const start = dayStartMs(dateKey);
+    const end = start + 24 * 60 * 60 * 1000;
+    const existing = await skillsRepository.getSessionForDate(id, start, end);
+    if (existing) throw new ConflictError('This skill is already completed for today.');
+
+    await skillsRepository.addSession({
+      id: generateId(),
+      skillId: id,
+      durationMinutes,
+      notes: null,
+      completedAt: now(),
+    });
   },
 
   async archiveSkill(id: string): Promise<void> {
@@ -86,8 +106,10 @@ export const skillsService = {
   },
 
   async getCompletedSkills(): Promise<Skill[]> {
+    // "Completed" now means practiced at least once. Keep the legacy state
+    // compatible with older data while daily practice controls Routine visibility.
     const all = await skillsRepository.list(true);
-    return all.filter((s) => s.state === 'completed');
+    return all.filter((s) => s.state === 'completed' && !s.archived);
   },
 
   async getArchivedSkills(): Promise<Skill[]> {
@@ -97,5 +119,11 @@ export const skillsService = {
 
   async getSessionHistory(skillId: string) {
     return skillsRepository.getSessions(skillId);
+  },
+
+  async isCompletedToday(skillId: string): Promise<boolean> {
+    const start = dayStartMs(todayKey());
+    const end = start + 24 * 60 * 60 * 1000;
+    return Boolean(await skillsRepository.getSessionForDate(skillId, start, end));
   },
 };
